@@ -31,7 +31,7 @@ const App = () => (
           <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/pricing" element={<Pricing />} />
-          <Route path="/" element={<ProtectedRoute><Index /></ProtectedRoute>} />
+          <Route path="/" element={<Index />} />
           <Route path="/setup" element={<ProtectedRoute><Setup /></ProtectedRoute>} />
           <Route path="/billing" element={<ProtectedRoute><Billing /></ProtectedRoute>} />
           <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />

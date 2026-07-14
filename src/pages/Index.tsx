@@ -37,9 +37,13 @@ const Index = () => {
       <div className="space-y-6">
         {/* Welcome Header */}
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-foreground">Hello, {greeting}!</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">
+            {user ? `Hello, ${greeting}!` : "Welcome to Profit Finder"}
+          </h1>
           <p className="text-sm text-muted-foreground">
-            Track your profits and understand why your margins change.
+            {user
+              ? "Track your profits and understand why your margins change."
+              : "Sign in to access your personalized profit dashboard."}
           </p>
         </div>
 
@@ -51,7 +55,7 @@ const Index = () => {
                 Products
               </p>
               <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 mt-1">
-                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : products.length}
+                {!user ? "—" : isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : products.length}
               </p>
             </CardContent>
           </Card>
@@ -61,7 +65,7 @@ const Index = () => {
                 Ingredients
               </p>
               <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">
-                {isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : totalIngredients}
+                {!user ? "—" : isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : totalIngredients}
               </p>
             </CardContent>
           </Card>
@@ -71,7 +75,7 @@ const Index = () => {
                 Avg Profit Margin
               </p>
               <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">
-                {isLoading ? (
+                {!user ? "—" : isLoading ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   `${avgProfitMargin.toFixed(1)}%`
@@ -81,31 +85,32 @@ const Index = () => {
           </Card>
         </div>
 
-        {/* AI-Powered Insights */}
+        {/* Guest CTA — visible only when not signed in */}
+        {!user && (
+          <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-primary/10 to-transparent shadow-md">
+            <CardContent className="p-6 text-center space-y-3">
+              <div className="text-3xl">🚀</div>
+              <h2 className="text-lg font-bold text-foreground">Start Tracking Your Profits</h2>
+              <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                Sign in to create products, track ingredient costs, and unlock AI-powered profit insights tailored to your business.
+              </p>
+              <a
+                href="/auth"
+                className="inline-block mt-2 px-6 py-2.5 rounded-lg bg-primary text-white font-semibold text-sm shadow hover:opacity-90 transition-all"
+              >
+                Sign In / Create Account
+              </a>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* AI-Powered Insights — only for signed-in users */}
         {user && (
           <section className="space-y-3">
             <h2 className="text-lg font-semibold text-foreground">🧠 AI Insights</h2>
             <AIInsights />
           </section>
         )}
-
-        {/* Profit Intelligence — commented out per request */}
-        {/* {user && (
-          <section className="space-y-3">
-            <h2 className="text-lg font-semibold text-foreground">📊 Profit Intelligence</h2>
-            <ProfitRootCause />
-          </section>
-        )} */}
-
-        {/* Product Margin Changes — commented out per request */}
-
-        {/* Receipt Scanner — commented out per request */}
-        {/* <section className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">Receipt Scanner</h2>
-          <ReceiptScanner />
-        </section> */}
-
-        {/* Detected Items — commented out per request (part of Receipt Scanner) */}
       </div>
     </AppLayout>
   );
