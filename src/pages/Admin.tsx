@@ -63,30 +63,50 @@ export default function Admin() {
       return;
     }
 
-    // Fall back to reading subscriptions directly
+    // Fall back to reading profiles and subscriptions directly
     toast({
       title: "Loading limited admin view",
-      description: "Edge function unavailable. Showing basic subscription data.",
+      description: "Edge function unavailable. Showing basic local database data.",
     });
 
-    const { data: subs, error: subsError } = await supabase
-      .from("subscriptions")
-      .select("user_id, plan, status, started_at, expires_at");
+    const [{ data: subs }, { data: profiles, error: profsError }] = await Promise.all([
+      supabase.from("subscriptions").select("user_id, plan, status, started_at, expires_at"),
+      supabase.from("profiles").select("*")
+    ]);
 
-    if (subsError) {
-      toast({ title: "Failed to load", description: subsError.message, variant: "destructive" });
+    if (profsError) {
+      toast({ title: "Failed to load clients", description: profsError.message, variant: "destructive" });
       return;
     }
 
-    const fallbackUsers: AdminUser[] = (subs || []).map((s: any) => ({
-      id: s.user_id,
-      email: s.user_id,
-      created_at: s.started_at || new Date().toISOString(),
-      last_sign_in_at: null,
-      profile: null,
-      subscription: { plan: s.plan, status: s.status, started_at: s.started_at, expires_at: s.expires_at },
-      roles: [],
-    }));
+    const fallbackUsers: AdminUser[] = (profiles || []).map((p: any) => {
+      const sub = subs?.find((s: any) => s.user_id === p.id) || null;
+      return {
+        id: p.id,
+        email: p.email || "No Email",
+        created_at: p.created_at || new Date().toISOString(),
+        last_sign_in_at: null,
+        profile: {
+          full_name: p.full_name || undefined,
+          phone: p.phone || undefined,
+          company_name: p.company_name || undefined,
+          industry: p.industry || undefined,
+          employee_count: p.employee_count || undefined
+        },
+        subscription: sub ? {
+          plan: sub.plan,
+          status: sub.status,
+          started_at: sub.started_at,
+          expires_at: sub.expires_at
+        } : {
+          plan: "free",
+          status: "inactive",
+          started_at: p.created_at || new Date().toISOString(),
+          expires_at: null
+        },
+        roles: [],
+      };
+    });
     setUsers(fallbackUsers);
   };
 

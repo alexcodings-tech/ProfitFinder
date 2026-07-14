@@ -16,11 +16,11 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_ANON_KEY')!,
       { global: { headers: { Authorization: authHeader } } }
     )
-    const { data: claims, error: cErr } = await userClient.auth.getClaims(token)
-    if (cErr || !claims?.claims) {
+    const { data: { user }, error: uErr } = await userClient.auth.getUser()
+    if (uErr || !user) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
-    const callerId = claims.claims.sub as string
+    const callerId = user.id
 
     const admin = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -33,8 +33,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 
-    const { data: usersData, error: uErr } = await admin.auth.admin.listUsers({ perPage: 1000 })
-    if (uErr) throw uErr
+    const { data: usersData, error: listErr } = await admin.auth.admin.listUsers({ perPage: 1000 })
+    if (listErr) throw listErr
 
     const ids = usersData.users.map((u) => u.id)
     const [{ data: profiles }, { data: subs }, { data: roles }] = await Promise.all([
