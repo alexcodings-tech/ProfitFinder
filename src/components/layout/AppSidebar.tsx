@@ -37,7 +37,9 @@ export function AppSidebar() {
   const navigate = useNavigate();
 
   const userInitials = user?.email?.slice(0, 2).toUpperCase() || "U";
-  const navItems = [...baseNav, ...(isAdmin ? [{ title: "Admin", url: "/admin", icon: Shield }] : [])];
+  const navItems = isAdmin
+    ? [{ title: "Client Management", url: "/admin", icon: Shield }]
+    : baseNav;
 
   return (
     <Sidebar collapsible="icon">

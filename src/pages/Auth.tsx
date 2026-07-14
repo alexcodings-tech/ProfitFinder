@@ -35,29 +35,78 @@ export default function AuthPage() {
   });
 
   useEffect(() => {
-    if (!loading && isAuthenticated) navigate("/", { replace: true });
+    if (!loading && isAuthenticated) {
+      const email = supabase.auth.getUser().then(({ data }) => {
+        const userEmail = data?.user?.email?.toLowerCase() || "";
+        const isAdminUser = ["admin12@gmail.com", "info@zhar.in"].includes(userEmail);
+        navigate(isAdminUser ? "/admin" : "/", { replace: true });
+      });
+    }
   }, [isAuthenticated, loading, navigate]);
+
+  const ADMIN_EMAILS = ["admin12@gmail.com", "info@zhar.in"];
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email: signInEmail, password: signInPwd });
-    setBusy(false);
-    if (error) {
-      // Check if it's the admin details to provide a helpful tip
-      if (signInEmail.toLowerCase() === "admin12@gmail.com") {
+    const emailLower = signInEmail.toLowerCase().trim();
+    const isAdminEmail = ADMIN_EMAILS.includes(emailLower);
+
+    // First attempt: normal sign in
+    let { data, error } = await supabase.auth.signInWithPassword({ email: signInEmail, password: signInPwd });
+
+    // If credentials are invalid and it's an admin email, auto-create the account and retry
+    if (error && error.message.includes("Invalid login credentials") && isAdminEmail) {
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: signInEmail,
+        password: signInPwd,
+        options: {
+          emailRedirectTo: `${window.location.origin}/`,
+          data: { full_name: "Admin", is_admin: true },
+        },
+      });
+
+      if (!signUpError) {
+        // If signUp returned a session directly (email confirmation disabled), use it
+        if (signUpData?.session) {
+          setBusy(false);
+          toast({ title: "Admin account auto-created & signed in!", description: "Your admin account has been set up." });
+          navigate("/admin", { replace: true });
+          return;
+        }
+
+        // Otherwise retry sign-in after account creation
+        const retryResult = await supabase.auth.signInWithPassword({ email: signInEmail, password: signInPwd });
+        data = retryResult.data;
+        error = retryResult.error;
+
+        if (!error) {
+          toast({ title: "Admin account auto-created & signed in!", description: "Your admin account has been set up." });
+        }
+      } else {
+        setBusy(false);
         toast({
           title: "Sign in failed",
-          description: `${error.message}. TIP: If you just created the database, make sure 'admin12@gmail.com' exists in Supabase. Or create your account using the SignUp tab and it will get Admin access automatically!`,
+          description: `Could not auto-create admin account: ${signUpError.message}`,
           variant: "destructive"
         });
-      } else {
-        toast({ title: "Sign in failed", description: error.message, variant: "destructive" });
+        return;
       }
+    }
+
+    setBusy(false);
+    if (error) {
+      toast({
+        title: "Sign in failed",
+        description: `${error.message}. ${isAdminEmail ? "TIP: Try a different password or use the Sign Up tab first." : "Check your credentials or use the Sign Up tab to create an account."}`,
+        variant: "destructive"
+      });
       return;
     }
-    toast({ title: "Welcome back!" });
-    navigate("/", { replace: true });
+    const email = data?.user?.email?.toLowerCase() || "";
+    const isAdminUser = ADMIN_EMAILS.includes(email);
+    toast({ title: isAdminUser ? "Welcome, Admin!" : "Welcome back!" });
+    navigate(isAdminUser ? "/admin" : "/", { replace: true });
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -82,13 +131,14 @@ export default function AuthPage() {
     });
     setBusy(false);
     if (error) return toast({ title: "Sign up failed", description: error.message, variant: "destructive" });
+    const isAdminSignup = ADMIN_EMAILS.includes(form.email.toLowerCase());
     toast({
       title: `Welcome, ${form.full_name}!`,
-      description: form.email.toLowerCase() === "admin12@gmail.com"
-        ? "Admin account created successfully! You are now logged in."
+      description: isAdminSignup
+        ? "Admin account created! Redirecting to admin dashboard..."
         : "Account created. Let's set up your first product."
     });
-    navigate(form.email.toLowerCase() === "admin12@gmail.com" ? "/" : "/setup", { replace: true });
+    navigate(isAdminSignup ? "/admin" : "/setup", { replace: true });
   };
 
   const handleGoogle = async () => {

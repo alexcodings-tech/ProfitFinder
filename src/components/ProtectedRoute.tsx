@@ -5,9 +5,10 @@ import { useUserRole } from "@/hooks/useUserRole";
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading } = useAuth();
+  const { isAdmin, loading: roleLoading } = useUserRole();
   const location = useLocation();
 
-  if (loading) {
+  if (loading || roleLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -16,6 +17,9 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
   if (!isAuthenticated) {
     return <Navigate to="/auth" state={{ from: location.pathname }} replace />;
+  }
+  if (isAdmin) {
+    return <Navigate to="/admin" replace />;
   }
   return <>{children}</>;
 }

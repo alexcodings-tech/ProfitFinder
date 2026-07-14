@@ -1,14 +1,27 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Shield, Users, CreditCard, Activity } from "lucide-react";
+import { Loader2, Shield, Users, UserCheck, UserX, Crown, Search, ArrowUpDown, RefreshCw, BarChart3 } from "lucide-react";
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart as ReBarChart,
+  Bar as ReBar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  CartesianGrid
+} from "recharts";
 
 interface AdminUser {
   id: string;
@@ -23,165 +36,512 @@ interface AdminUser {
 export default function Admin() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
-  const [planFilter, setPlanFilter] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortField, setSortField] = useState<"name" | "date" | "plan">("name");
+  const [sortAsc, setSortAsc] = useState(true);
   const { toast } = useToast();
+
+  const ADMIN_EMAILS = ["admin12@gmail.com", "info@zhar.in"];
 
   const load = async () => {
     setLoading(true);
+
+    // Self-insert admin role if not already present (handles first-time admin login)
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (currentUser && ADMIN_EMAILS.includes(currentUser.email?.toLowerCase() || "")) {
+      await supabase
+        .from("user_roles")
+        .upsert({ user_id: currentUser.id, role: "admin" }, { onConflict: "user_id,role" });
+    }
+
+    // Try edge function first
     const { data, error } = await supabase.functions.invoke("admin-users");
     setLoading(false);
-    if (error) return toast({ title: "Failed to load", description: error.message, variant: "destructive" });
-    setUsers((data as any)?.users || []);
+
+    if (!error) {
+      setUsers((data as any)?.users || []);
+      return;
+    }
+
+    // Fall back to reading subscriptions directly
+    toast({
+      title: "Loading limited admin view",
+      description: "Edge function unavailable. Showing basic subscription data.",
+    });
+
+    const { data: subs, error: subsError } = await supabase
+      .from("subscriptions")
+      .select("user_id, plan, status, started_at, expires_at");
+
+    if (subsError) {
+      toast({ title: "Failed to load", description: subsError.message, variant: "destructive" });
+      return;
+    }
+
+    const fallbackUsers: AdminUser[] = (subs || []).map((s: any) => ({
+      id: s.user_id,
+      email: s.user_id,
+      created_at: s.started_at || new Date().toISOString(),
+      last_sign_in_at: null,
+      profile: null,
+      subscription: { plan: s.plan, status: s.status, started_at: s.started_at, expires_at: s.expires_at },
+      roles: [],
+    }));
+    setUsers(fallbackUsers);
   };
 
   useEffect(() => {
     load();
   }, []);
 
-  const changePlan = async (userId: string, plan: "free" | "pro") => {
-    const { error } = await supabase
-      .from("subscriptions")
-      .update({ plan, status: "active", started_at: new Date().toISOString() })
-      .eq("user_id", userId);
-    if (error) return toast({ title: "Failed", description: error.message, variant: "destructive" });
-    toast({ title: `Plan updated to ${plan}` });
-    load();
+  // --- Derived data ---
+  // If the client has no name, use the email ID as the name
+  const getClientName = (u: AdminUser) => u.profile?.full_name || u.email || "Unknown";
+
+  const isSubscribed = (u: AdminUser) =>
+    u.subscription?.plan === "pro" && u.subscription?.status === "active";
+
+  const subscribedClients = users.filter(isSubscribed);
+  const nonSubscribedClients = users.filter((u) => !isSubscribed(u));
+
+  // --- Sorting ---
+  const handleSort = (field: "name" | "date" | "plan") => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
+    }
   };
 
-  const filtered = planFilter === "all" ? users : users.filter((u) => u.subscription?.plan === planFilter);
+  const sortUsers = (list: AdminUser[]) => {
+    const sorted = [...list].sort((a, b) => {
+      if (sortField === "name") return getClientName(a).localeCompare(getClientName(b));
+      if (sortField === "date") return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      if (sortField === "plan") return (a.subscription?.plan || "free").localeCompare(b.subscription?.plan || "free");
+      return 0;
+    });
+    return sortAsc ? sorted : sorted.reverse();
+  };
+
+  const filterUsers = (list: AdminUser[]) => {
+    if (!searchQuery.trim()) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter(
+      (u) =>
+        getClientName(u).toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.profile?.company_name || "").toLowerCase().includes(q)
+    );
+  };
+
+  const processUsers = (list: AdminUser[]) => sortUsers(filterUsers(list));
+
+  // --- Chart / Analytics Processing ---
+  // 1. Subscription Distribution Data (Pie Chart)
+  const pieData = [
+    { name: "Pro Plan", value: subscribedClients.length, color: "#f59e0b" },
+    { name: "Free Plan", value: nonSubscribedClients.length, color: "#64748b" }
+  ].filter(item => item.value > 0);
+
+  // 2. Signup Trends over time (Bar Chart)
+  const signupMap = users.reduce((acc, user) => {
+    try {
+      const date = new Date(user.created_at);
+      const label = date.toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+      acc[label] = (acc[label] || 0) + 1;
+    } catch { }
+    return acc;
+  }, {} as Record<string, number>);
+
+  const signupChartData = Object.entries(signupMap)
+    .map(([date, count]) => ({ date, count }))
+    .slice(-6); // Last 6 months
+
+  // 3. Industry Breakdown Data (Bar Chart)
+  const industryMap = users.reduce((acc, curr) => {
+    const ind = curr.profile?.industry || "Unspecified";
+    acc[ind] = (acc[ind] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const industryChartData = Object.entries(industryMap)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5); // Top 5 industries
+
+  // --- Table renderer ---
+  const SortButton = ({ field, label }: { field: "name" | "date" | "plan"; label: string }) => (
+    <button
+      onClick={() => handleSort(field)}
+      className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+    >
+      {label}
+      <ArrowUpDown className={`h-3 w-3 ${sortField === field ? "text-primary" : "opacity-40"}`} />
+    </button>
+  );
+
+  const ClientTable = ({ data, emptyMessage }: { data: AdminUser[]; emptyMessage: string }) => {
+    const processed = processUsers(data);
+    if (processed.length === 0) {
+      return (
+        <div className="py-12 text-center">
+          <Users className="h-10 w-10 mx-auto text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">{searchQuery ? "No clients match your search." : emptyMessage}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead className="w-[200px]"><SortButton field="name" label="Client Name" /></TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Company</TableHead>
+              <TableHead>Industry</TableHead>
+              <TableHead><SortButton field="plan" label="Plan" /></TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead><SortButton field="date" label="Joined" /></TableHead>
+              <TableHead>Last Active</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {processed.map((u) => (
+              <TableRow key={u.id} className="group">
+                <TableCell className="font-medium">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary text-xs font-bold">
+                      {getClientName(u).slice(0, 2).toUpperCase()}
+                    </div>
+                    <span className="truncate max-w-[160px]" title={getClientName(u)}>
+                      {getClientName(u)}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">{u.email}</TableCell>
+                <TableCell className="text-sm">{u.profile?.company_name || <span className="text-muted-foreground/50">—</span>}</TableCell>
+                <TableCell className="text-sm">{u.profile?.industry || <span className="text-muted-foreground/50">—</span>}</TableCell>
+                <TableCell>
+                  <Badge
+                    variant={u.subscription?.plan === "pro" ? "default" : "outline"}
+                    className={u.subscription?.plan === "pro"
+                      ? "bg-gradient-to-r from-amber-500 to-orange-500 text-white border-0 gap-1"
+                      : "text-muted-foreground"
+                    }
+                  >
+                    {u.subscription?.plan === "pro" && <Crown className="h-3 w-3" />}
+                    {(u.subscription?.plan || "free").toUpperCase()}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${u.subscription?.status === "active" ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
+                    }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${u.subscription?.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/40"
+                      }`} />
+                    {u.subscription?.status || "inactive"}
+                  </span>
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {new Date(u.created_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {u.last_sign_in_at
+                    ? new Date(u.last_sign_in_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                    : <span className="text-muted-foreground/50">Never</span>}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    );
+  };
 
   return (
     <AppLayout>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Shield className="h-6 w-6 text-primary" /> Admin Panel
-          </h1>
-          <p className="text-sm text-muted-foreground">Manage clients, subscriptions, and activity.</p>
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <Shield className="h-6 w-6 text-primary" /> Client Management & Analytics
+            </h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Monitor registered users, plans, and signup distribution statistics.</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} className="gap-2 self-start animate-fade-in">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
         </div>
 
+        {/* Stat Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Total Users</p><p className="text-2xl font-bold">{users.length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Pro Users</p><p className="text-2xl font-bold text-primary">{users.filter((u) => u.subscription?.plan === "pro").length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Free Users</p><p className="text-2xl font-bold">{users.filter((u) => u.subscription?.plan === "free").length}</p></CardContent></Card>
-          <Card><CardContent className="p-4"><p className="text-xs text-muted-foreground">Admins</p><p className="text-2xl font-bold">{users.filter((u) => u.roles.includes("admin")).length}</p></CardContent></Card>
+          <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/40 dark:to-blue-900/20 border-blue-200/60 dark:border-blue-800/40 shadow-sm transition-all hover:shadow-md">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">Total Clients</p>
+                  <p className="text-2xl font-bold text-blue-700 dark:text-blue-300 mt-0.5">{loading ? "—" : users.length}</p>
+                </div>
+                <Users className="h-8 w-8 text-blue-400/45" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/40 dark:to-emerald-900/20 border-emerald-200/60 dark:border-emerald-800/40 shadow-sm transition-all hover:shadow-md">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Subscribed</p>
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-0.5">{loading ? "—" : subscribedClients.length}</p>
+                </div>
+                <UserCheck className="h-8 w-8 text-emerald-400/45" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-slate-50 to-slate-100/50 dark:from-slate-950/40 dark:to-slate-900/20 border-slate-200/60 dark:border-slate-700/40 shadow-sm transition-all hover:shadow-md">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Non-Subscribed</p>
+                  <p className="text-2xl font-bold text-slate-700 dark:text-slate-300 mt-0.5">{loading ? "—" : nonSubscribedClients.length}</p>
+                </div>
+                <UserX className="h-8 w-8 text-slate-400/35" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-gradient-to-br from-amber-50 to-orange-100/50 dark:from-amber-950/40 dark:to-orange-900/20 border-amber-200/60 dark:border-amber-800/40 shadow-sm transition-all hover:shadow-md">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">Pro Plan</p>
+                  <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-0.5">{loading ? "—" : users.filter((u) => u.subscription?.plan === "pro").length}</p>
+                </div>
+                <Crown className="h-8 w-8 text-amber-400/45" />
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <Tabs defaultValue="clients">
-          <TabsList className="grid grid-cols-3 w-full sm:w-auto">
-            <TabsTrigger value="clients"><Users className="h-4 w-4 mr-1 hidden sm:inline" />Clients</TabsTrigger>
-            <TabsTrigger value="subs"><CreditCard className="h-4 w-4 mr-1 hidden sm:inline" />Subscriptions</TabsTrigger>
-            <TabsTrigger value="activity"><Activity className="h-4 w-4 mr-1 hidden sm:inline" />Activity</TabsTrigger>
-          </TabsList>
+        {/* Client Tabs & Analytics */}
+        {loading ? (
+          <div className="py-16 text-center">
+            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary/60" />
+            <p className="text-sm text-muted-foreground mt-3">Loading clients...</p>
+          </div>
+        ) : (
+          <Tabs defaultValue="all" className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <TabsList className="bg-muted/65 p-1 rounded-xl w-fit self-start">
+                <TabsTrigger value="all" className="rounded-lg gap-1.5 data-[state=active]:shadow-sm">
+                  <Users className="h-3.5 w-3.5" />
+                  All Clients
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] rounded-md">{users.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="subscribed" className="rounded-lg gap-1.5 data-[state=active]:shadow-sm">
+                  <UserCheck className="h-3.5 w-3.5" />
+                  Subscribed
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] rounded-md">{subscribedClients.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="non-subscribed" className="rounded-lg gap-1.5 data-[state=active]:shadow-sm">
+                  <UserX className="h-3.5 w-3.5" />
+                  Non-Subscribed
+                  <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] rounded-md">{nonSubscribedClients.length}</Badge>
+                </TabsTrigger>
+                <TabsTrigger value="analytics" className="rounded-lg gap-1.5 data-[state=active]:shadow-sm">
+                  <BarChart3 className="h-3.5 w-3.5" />
+                  Charts & Analytics
+                </TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="clients">
-            <Card>
-              <CardHeader><CardTitle className="text-base">All Clients</CardTitle></CardHeader>
-              <CardContent>
-                {loading ? <div className="py-8 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></div> : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Email</TableHead>
-                          <TableHead>Company</TableHead>
-                          <TableHead>Industry</TableHead>
-                          <TableHead>Employees</TableHead>
-                          <TableHead>Plan</TableHead>
-                          <TableHead>Signup</TableHead>
-                          <TableHead>Last Login</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {users.map((u) => (
-                          <TableRow key={u.id}>
-                            <TableCell>{u.profile?.full_name || "—"}</TableCell>
-                            <TableCell className="text-xs">{u.email}</TableCell>
-                            <TableCell>{u.profile?.company_name || "—"}</TableCell>
-                            <TableCell>{u.profile?.industry || "—"}</TableCell>
-                            <TableCell>{u.profile?.employee_count || "—"}</TableCell>
-                            <TableCell>
-                              <Badge variant={u.subscription?.plan === "pro" ? "default" : "outline"}>
-                                {u.subscription?.plan || "free"}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-xs">{new Date(u.created_at).toLocaleDateString()}</TableCell>
-                            <TableCell className="text-xs">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleDateString() : "—"}</TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="subs">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-base">Subscriptions</CardTitle>
-                <Select value={planFilter} onValueChange={setPlanFilter}>
-                  <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    <SelectItem value="all">All plans</SelectItem>
-                    <SelectItem value="free">Free</SelectItem>
-                    <SelectItem value="pro">Pro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader><TableRow>
-                      <TableHead>User</TableHead><TableHead>Plan</TableHead><TableHead>Status</TableHead><TableHead>Started</TableHead><TableHead>Actions</TableHead>
-                    </TableRow></TableHeader>
-                    <TableBody>
-                      {filtered.map((u) => (
-                        <TableRow key={u.id}>
-                          <TableCell className="text-xs">{u.email}</TableCell>
-                          <TableCell><Badge variant={u.subscription?.plan === "pro" ? "default" : "outline"}>{u.subscription?.plan}</Badge></TableCell>
-                          <TableCell>{u.subscription?.status}</TableCell>
-                          <TableCell className="text-xs">{u.subscription?.started_at ? new Date(u.subscription.started_at).toLocaleDateString() : "—"}</TableCell>
-                          <TableCell>
-                            {u.subscription?.plan === "free" ? (
-                              <Button size="sm" onClick={() => changePlan(u.id, "pro")}>Upgrade to Pro</Button>
-                            ) : (
-                              <Button size="sm" variant="outline" onClick={() => changePlan(u.id, "free")}>Downgrade</Button>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+              <TabsContent value="analytics" className="m-0" />
+              {/* Only show search bar if we are NOT on the charts/analytics tab */}
+              <TabsContent value="all" className="m-0">
+                <div className="relative max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Search clients..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9 rounded-lg"
+                  />
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="activity">
-            <Card>
-              <CardHeader><CardTitle className="text-base">Recent Activity</CardTitle></CardHeader>
-              <CardContent>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader><TableRow><TableHead>User</TableHead><TableHead>Signed Up</TableHead><TableHead>Last Sign In</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {[...users].sort((a, b) => (b.last_sign_in_at || "").localeCompare(a.last_sign_in_at || "")).slice(0, 20).map((u) => (
-                        <TableRow key={u.id}>
-                          <TableCell className="text-xs">{u.email}</TableCell>
-                          <TableCell className="text-xs">{new Date(u.created_at).toLocaleString()}</TableCell>
-                          <TableCell className="text-xs">{u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString() : "Never"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+              </TabsContent>
+              <TabsContent value="subscribed" className="m-0">
+                <div className="relative max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Search subscribed..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9 rounded-lg"
+                  />
                 </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+              </TabsContent>
+              <TabsContent value="non-subscribed" className="m-0">
+                <div className="relative max-w-xs">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    placeholder="Search non-subscribed..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 h-9 rounded-lg"
+                  />
+                </div>
+              </TabsContent>
+            </div>
+
+            <TabsContent value="all">
+              <Card className="border-border/60 shadow-sm rounded-xl">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">All Clients</CardTitle>
+                  <CardDescription className="text-xs">Complete list of all registered clients on the platform.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ClientTable data={users} emptyMessage="No clients have registered yet." />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="subscribed">
+              <Card className="border-emerald-200/40 dark:border-emerald-800/30 shadow-sm rounded-xl">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <UserCheck className="h-4 w-4 text-emerald-500" /> Subscribed Clients
+                  </CardTitle>
+                  <CardDescription className="text-xs">Clients with an active Pro subscription.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ClientTable data={subscribedClients} emptyMessage="No clients are currently subscribed to Pro." />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="non-subscribed">
+              <Card className="border-slate-200/40 dark:border-slate-700/30 shadow-sm rounded-xl">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <UserX className="h-4 w-4 text-slate-400" /> Non-Subscribed Clients
+                  </CardTitle>
+                  <CardDescription className="text-xs">Clients on the free plan or without an active subscription.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <ClientTable data={nonSubscribedClients} emptyMessage="All clients are subscribed!" />
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="analytics" className="space-y-6">
+              {/* Charts grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                {/* 1. Subscription Pie Chart */}
+                <Card className="border-border/60 shadow-sm rounded-xl">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Crown className="h-4 w-4 text-amber-500" /> Subscription Share
+                    </CardTitle>
+                    <CardDescription className="text-xs">Breakdown of Pro versus Free plans.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-80 flex items-center justify-center">
+                    {pieData.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No subscription data available.</p>
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center">
+                        <ResponsiveContainer width="100%" height="80%">
+                          <PieChart>
+                            <Pie
+                              data={pieData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={80}
+                              paddingAngle={4}
+                              dataKey="value"
+                              label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                            >
+                              {pieData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color} />
+                              ))}
+                            </Pie>
+                            <Tooltip formatter={(value) => [`${value} Clients`, 'Count']} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div className="flex gap-4 mt-2 justify-center text-xs">
+                          {pieData.map((d) => (
+                            <div key={d.name} className="flex items-center gap-1.5">
+                              <div className="h-3 w-3 rounded-full" style={{ backgroundColor: d.color }} />
+                              <span className="text-muted-foreground font-medium">{d.name} ({d.value})</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* 2. Signup Trends Bar Chart */}
+                <Card className="border-border/60 shadow-sm rounded-xl">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Users className="h-4 w-4 text-blue-500" /> Signup History
+                    </CardTitle>
+                    <CardDescription className="text-xs">Weekly/monthly cohort of new registrations.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-80">
+                    {signupChartData.length === 0 ? (
+                      <div className="h-full flex items-center justify-center">
+                        <p className="text-sm text-muted-foreground">No signup trends database available.</p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ReBarChart data={signupChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.15} />
+                          <XAxis dataKey="date" fontSize={11} tickLine={false} axisLine={false} />
+                          <YAxis fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                          <Tooltip formatter={(value) => [`${value} Signups`, 'Registrations']} />
+                          <ReBar dataKey="count" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} barSize={25} />
+                        </ReBarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* 3. Industry breakdown horizontal chart */}
+                <Card className="border-border/60 shadow-sm rounded-xl md:col-span-2">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <BarChart3 className="h-4 w-4 text-indigo-500" /> Distribution by Business Industry
+                    </CardTitle>
+                    <CardDescription className="text-xs">Top business sectors selected by registered clients.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="h-80">
+                    {industryChartData.length === 0 ? (
+                      <div className="h-full flex items-center justify-center">
+                        <p className="text-sm text-muted-foreground">No industry data available.</p>
+                      </div>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ReBarChart
+                          data={industryChartData}
+                          layout="vertical"
+                          margin={{ top: 10, right: 30, left: 30, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.15} />
+                          <XAxis type="number" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+                          <YAxis dataKey="name" type="category" fontSize={11} tickLine={false} axisLine={false} />
+                          <Tooltip formatter={(value) => [`${value} Clients`, 'Count']} />
+                          <ReBar dataKey="count" fill="#4f46e5" radius={[0, 4, 4, 0]} barSize={20} />
+                        </ReBarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+
+              </div>
+            </TabsContent>
+          </Tabs>
+        )}
       </div>
     </AppLayout>
   );

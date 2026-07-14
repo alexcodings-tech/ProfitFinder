@@ -3,11 +3,22 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 
 export function useUserRole() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [prevUserId, setPrevUserId] = useState<string | null>(null);
+
+  // If user ID changed (meaning login/logout/session load), reset loading and admin flags synchronously
+  const currentUserId = user?.id || null;
+  if (currentUserId !== prevUserId) {
+    setPrevUserId(currentUserId);
+    setLoading(true);
+    setIsAdmin(false);
+  }
 
   useEffect(() => {
+    if (authLoading) return;
+
     if (!user) {
       setIsAdmin(false);
       setLoading(false);
@@ -29,8 +40,8 @@ export function useUserRole() {
         setIsAdmin(!!data?.some((r: any) => r.role === "admin"));
         setLoading(false);
       });
-  }, [user]);
+  }, [user, authLoading]);
 
-  return { isAdmin, loading };
+  return { isAdmin, loading: loading || authLoading };
 }
 

@@ -6,10 +6,21 @@ import { useBusinessIntelligence } from "@/hooks/useBusinessIntelligence";
 import { useProducts } from "@/hooks/useProducts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { useUserRole } from "@/hooks/useUserRole";
 
 const Index = () => {
   const { user } = useAuth();
+  const { isAdmin, loading: roleLoading } = useUserRole();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && isAdmin && !roleLoading) {
+      navigate("/admin", { replace: true });
+    }
+  }, [user, isAdmin, roleLoading, navigate]);
+
   const { totalIngredients, isLoading: statsLoading } = useDashboardStats();
   const { products, isLoading: productsLoading } = useProducts();
   const { data: bi, isLoading: biLoading } = useBusinessIntelligence();
