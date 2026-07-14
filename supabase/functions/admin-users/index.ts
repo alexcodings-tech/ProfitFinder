@@ -27,9 +27,13 @@ Deno.serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // verify caller is admin
+    // verify caller is admin (allow hardcoded admin emails as fallback)
     const { data: roleRow } = await admin.from('user_roles').select('role').eq('user_id', callerId).eq('role', 'admin').maybeSingle()
-    if (!roleRow) {
+
+    const callerEmail = user.email?.toLowerCase() || ""
+    const isHardcodedAdmin = ['admin12@gmail.com', 'info@zhar.in'].includes(callerEmail)
+
+    if (!roleRow && !isHardcodedAdmin) {
       return new Response(JSON.stringify({ error: 'Forbidden' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
 

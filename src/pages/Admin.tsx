@@ -39,6 +39,9 @@ export default function Admin() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<"name" | "date" | "plan">("name");
   const [sortAsc, setSortAsc] = useState(true);
+  const [edgeError, setEdgeError] = useState<string | null>(null);
+  const [currentUserInfo, setCurrentUserInfo] = useState<any>(null);
+  const [dbAdminCheck, setDbAdminCheck] = useState<{ hasRole: boolean; checked: boolean }>({ hasRole: false, checked: false });
   const { toast } = useToast();
 
   const ADMIN_EMAILS = ["admin12@gmail.com", "info@zhar.in"];
@@ -46,8 +49,10 @@ export default function Admin() {
   const load = async () => {
     setLoading(true);
 
-    // Self-insert admin role if not already present (handles first-time admin login)
     const { data: { user: currentUser } } = await supabase.auth.getUser();
+    setCurrentUserInfo(currentUser);
+
+    // Self-insert admin role if not already present (handles first-time admin login)
     if (currentUser && ADMIN_EMAILS.includes(currentUser.email?.toLowerCase() || "")) {
       await supabase
         .from("user_roles")
@@ -60,8 +65,11 @@ export default function Admin() {
 
     if (!error) {
       setUsers((data as any)?.users || []);
+      setEdgeError(null);
       return;
     }
+
+    setEdgeError(error.message || JSON.stringify(error));
 
     // Fall back to reading profiles and subscriptions directly
     toast({
@@ -73,6 +81,18 @@ export default function Admin() {
       supabase.from("subscriptions").select("user_id, plan, status, started_at, expires_at"),
       supabase.from("profiles").select("*")
     ]);
+
+    if (currentUser) {
+      const { data: roleCheck } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", currentUser.id);
+
+      setDbAdminCheck({
+        hasRole: !!roleCheck?.some((r: any) => r.role === "admin"),
+        checked: true
+      });
+    }
 
     if (profsError) {
       toast({ title: "Failed to load clients", description: profsError.message, variant: "destructive" });
@@ -294,6 +314,36 @@ export default function Admin() {
             Refresh
           </Button>
         </div>
+
+        {/* Warning card for Edge Function or DB configuration issues */}
+        {edgeError && (
+          <Card className="border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800/60 shadow-sm rounded-xl">
+            <CardContent className="p-4 flex gap-3">
+              <Shield className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <div className="text-sm text-amber-850 dark:text-amber-300">
+                <p className="font-semibold text-amber-900 dark:text-amber-450">Edge Function Offline / Error</p>
+                <p className="mt-0.5">
+                  The <code className="px-1 py-0.5 bg-amber-100 dark:bg-amber-900 rounded font-mono text-xs">admin-users</code> Edge Function returned an error: <span className="font-semibold">{edgeError}</span>.
+                </p>
+                {dbAdminCheck.checked && !dbAdminCheck.hasRole && (
+                  <div className="mt-3 pl-3 border-l-2 border-rose-500 text-rose-800 dark:text-rose-350">
+                    <p className="font-semibold text-rose-900 dark:text-rose-450">🚨 Database Admin Privilege Missing</p>
+                    <p className="mt-0.5">
+                      Your account (<span className="font-semibold">{currentUserInfo?.email}</span>) is not marked as an <code className="font-mono text-xs">admin</code> in the database <code className="font-mono text-xs">user_roles</code> table.
+                      Because Row-Level Security (RLS) is active, you are only allowed to read your own client profile details (showing exactly 1 client: yourself).
+                    </p>
+                    <p className="mt-2">
+                      To fix this, please run the following SQL script inside the <b>SQL Editor</b> of your Supabase dashboard:
+                    </p>
+                    <pre className="mt-1.5 p-2 bg-rose-50 dark:bg-rose-950/50 border border-rose-200/50 text-rose-900 dark:text-rose-300 rounded font-mono text-[10.5px] select-all overflow-x-auto whitespace-pre-wrap">
+                      {`INSERT INTO public.user_roles (user_id, role) VALUES ('${currentUserInfo?.id || "your-user-id"}', 'admin') ON CONFLICT DO NOTHING;`}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stat Cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
