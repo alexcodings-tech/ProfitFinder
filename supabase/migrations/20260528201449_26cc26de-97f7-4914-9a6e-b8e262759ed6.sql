@@ -1,0 +1,1 @@
+ALTER TABLE public.product_cost_snapshots ADD COLUMN IF NOT EXISTS recommended_price numeric NOT NULL DEFAULT 0;

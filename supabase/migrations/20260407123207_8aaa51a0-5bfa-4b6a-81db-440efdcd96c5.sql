@@ -1,0 +1,1 @@
+ALTER TABLE public.product_ingredients ADD COLUMN total_purchased numeric NOT NULL DEFAULT 0;
