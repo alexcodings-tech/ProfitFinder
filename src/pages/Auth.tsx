@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Receipt, AlertTriangle } from "lucide-react";
+import { Loader2, Receipt, AlertTriangle, ArrowLeft } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 const industries = ["Food & Beverage", "Manufacturing", "Retail", "Services", "Bakery", "Restaurant", "Other"];
@@ -130,6 +130,15 @@ export default function AuthPage() {
         <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-primary/20 blur-[120px] pointer-events-none" />
         <div className="absolute -bottom-45 -right-45 w-[650px] h-[650px] rounded-full bg-indigo-500/10 blur-[130px] pointer-events-none" />
       </div>
+
+      {/* Back button */}
+      <button
+        onClick={() => navigate(-1)}
+        className="absolute top-4 left-4 z-20 flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group"
+      >
+        <ArrowLeft className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" />
+        Back
+      </button>
 
       <div className="w-full max-w-md relative z-10">
         <div className="flex flex-col items-center mb-6">

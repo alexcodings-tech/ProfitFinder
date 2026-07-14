@@ -1,7 +1,7 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Check, Crown, Sparkles, Loader2, ShieldCheck, HelpCircle, Utensils, Box, ShieldAlert } from "lucide-react";
+import { Check, Crown, Sparkles, Loader2, ShieldCheck, Utensils, Box, ArrowLeft } from "lucide-react";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
@@ -75,6 +75,7 @@ export default function Pricing() {
   // Inline SVG tech mesh pattern for premium design background
   const gridSvgBackground = `url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M54 48c-2 0-3 1-4 2s-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2v-4c2 0 3-1 4-2s2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2v-4c-2 0-3 1-4 2s-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2v-4c2 0 3-1 4-2s2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2v-4c-2 0-3 1-4 2s-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2v-4c2 0 3-1 4-2s2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2v-4c-2 0-3 1-4 2s-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2v-4c2 0 3-1 4-2s2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2 2-1 4-1 3 1 4 2 2 1 4 1 3-1 4-2v-4c-2 0-3 1-4 2s-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2-2-1-4-1-3 1-4 2-2 1-4 1-3-1-4-2z' fill='%236366f1' fill-opacity='0.02' fill-rule='evenodd'/%3E%3C/svg%3E")`;
 
+
   const content = (
     <div className="relative w-full h-[calc(100vh-5rem)] md:h-[calc(100vh-6rem)] flex flex-col justify-center py-2 px-4 overflow-hidden">
       {/* Background SVG Grid and Glow Effects */}
@@ -98,6 +99,15 @@ export default function Pricing() {
         <div className="absolute top-1/4 left-1/4 -translate-y-1/2 -translate-x-1/2 w-[350px] h-[350px] bg-primary/10 rounded-full blur-[90px] pointer-events-none" />
         <div className="absolute bottom-1/4 right-1/4 translate-y-1/2 translate-x-1/2 w-[350px] h-[350px] bg-emerald-500/5 rounded-full blur-[90px] pointer-events-none" />
       </div>
+
+      {/* Back button */}
+      <button
+        onClick={() => navigate(-1)}
+        className="absolute top-4 left-4 z-20 flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors group"
+      >
+        <ArrowLeft className="h-4 w-4 group-hover:-translate-x-0.5 transition-transform" />
+        Back
+      </button>
 
       <div className="max-w-4xl w-full mx-auto space-y-3.5 md:space-y-5 relative z-10">
         <div className="text-center space-y-1 sm:space-y-1.5">
